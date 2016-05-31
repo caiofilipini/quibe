@@ -36,7 +36,7 @@ func produce() {
 		clientID = rf.ClientID
 		id := 1
 
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(5 * time.Second)
 		for _ = range ticker.C {
 			msg := transport.NewMessage([]byte(fmt.Sprintf("message %d", id)))
 			pr := transport.ProduceRequestFrame{
@@ -96,6 +96,10 @@ func consume() {
 			mf := transport.MessageFrame{}
 			err = bson.Unmarshal(frame, &mf)
 			dieOn(err)
+			if mf.Message.IsEmpty() {
+				log.Printf("[Consumer] Message is empty! Stopping...")
+				break
+			}
 			log.Printf("[Consumer] Consuming %s\n", mf.Message.BodyString())
 		}
 	}

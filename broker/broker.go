@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/caiofilipini/quibe/logger"
 	"github.com/caiofilipini/quibe/transport"
@@ -17,26 +18,74 @@ type producer struct {
 	log       logger.Logger
 }
 
-func (p *producer) SendResponse(response string) {
-	sendResponse(p.clientID, response, p.conn)
+func (p *producer) SendResponse(response string) error {
+	return sendResponse(p.clientID, response, p.conn)
 }
 
 type consumer struct {
 	clientID  string
 	queueName string
 	conn      net.Conn
+	connected bool
 	log       logger.Logger
 }
 
-func (c *consumer) SendResponse(response string) {
-	sendResponse(c.clientID, response, c.conn)
+func (c *consumer) SendResponse(response string) error {
+	return sendResponse(c.clientID, response, c.conn)
 }
 
-func (c *consumer) SendMessage(m *transport.Message) {
+func (c *consumer) SendMessage(m *transport.Message) error {
 	err := transport.WriteMessage(c.clientID, m, c.conn)
 	if err != nil {
 		c.log.Warn(fmt.Sprintf("Couldn't send message to client %s: %s", c.clientID, err))
 	}
+	return err
+}
+
+func (c *consumer) sendError(err error) bool {
+	if c.connected {
+		err := c.SendResponse(transport.ErrInternal)
+		return err == nil
+	}
+	return false
+}
+
+func (c *consumer) sendWhenReady(q *Queue) error {
+	var msg *transport.Message
+
+	// TODO: error handling here makes my eyes hurt!
+	for msg == nil && c.connected {
+		msg, popErr := q.Pop()
+		if popErr == nil {
+			sndErr := c.SendMessage(msg)
+
+			if sndErr != nil {
+				if ok := c.sendError(sndErr); !ok {
+					return sndErr
+				}
+			}
+		} else {
+			err := popErr
+
+			if err == ErrEmptyQueue {
+				c.log.Debug(popErr.Error())
+
+				err = c.SendMessage(&transport.EmptyMessage)
+			}
+
+			if err != nil {
+				c.log.Error(err)
+
+				if ok := c.sendError(err); !ok {
+					return err
+				}
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	return nil
 }
 
 type queueStore struct {
@@ -129,6 +178,7 @@ func (b *Broker) handleClients() {
 				clientID:  clientID,
 				queueName: hsReq.Queue,
 				conn:      clientConn,
+				connected: true,
 				log:       logger.NewLogger("consumer"),
 			}
 			go b.handleConsumer(&c)
@@ -196,6 +246,7 @@ func (b *Broker) handleConsumer(c *consumer) {
 			if err == io.EOF {
 				// client connection was closed...
 				running = false
+				c.connected = false
 			}
 		} else {
 			c.log.Info(fmt.Sprintf("Request received: %#v", cReq))
@@ -207,18 +258,15 @@ func (b *Broker) handleConsumer(c *consumer) {
 				return
 			}
 
-			msg, err := q.Pop()
-			if err == nil {
-				c.SendMessage(msg)
-			} else {
-				c.log.Error(err)
+			err = c.sendWhenReady(q)
+			if err != nil {
+				c.log.Info("Consumer disconnected, giving up.")
+				running = false
+				c.connected = false
+				return
 			}
-			// TODO figure out how to handle empty queue
-			// if err != nil {
-			// 	c.log.Error(fmt.Errorf("Error popping message: %s", err.Error()))
-			// }
-			q.peek()
 
+			q.peek()
 		}
 	}
 
@@ -248,10 +296,6 @@ func (b *Broker) handshake(clientConn net.Conn) (string, *transport.HandshakeReq
 	}
 }
 
-func sendResponse(clientID string, response string, w io.Writer) {
-	err := transport.WriteResponse(clientID, response, w)
-	if err != nil {
-		panic(err) // TODO wat
-		// p.log.Warn(fmt.Sprintf("Couldn't send response to client %s: %s", clientID, err))
-	}
+func sendResponse(clientID string, response string, w io.Writer) error {
+	return transport.WriteResponse(clientID, response, w)
 }
