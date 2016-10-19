@@ -14,7 +14,7 @@ import (
 )
 
 func produce() {
-	pconn, err := net.Dial("tcp", "localhost:3333")
+	pconn, err := net.Dial("tcp", "localhost:4242")
 	if err != nil {
 		log.Fatal(err)
 	}

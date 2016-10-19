@@ -10,6 +10,11 @@ import (
 	"github.com/caiofilipini/quibe/transport"
 )
 
+const (
+	DefaultHost = "localhost"
+	DefaultPort = 4242
+)
+
 type producer struct {
 	clientID  string
 	queueName string

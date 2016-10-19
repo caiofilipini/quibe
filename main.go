@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -9,7 +10,13 @@ import (
 )
 
 func main() {
-	b, err := broker.NewBroker("localhost", 3333)
+	var (
+		bindAddr = flag.String("bind-addr", broker.DefaultHost, "the IP address/hostname to bind to")
+		port     = flag.Int("port", broker.DefaultPort, "the port to bind to")
+	)
+	flag.Parse()
+
+	b, err := broker.NewBroker(*bindAddr, *port)
 	if err != nil {
 		log.Fatal(err)
 	}
