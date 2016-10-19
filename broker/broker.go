@@ -93,12 +93,13 @@ func (c *consumer) sendWhenReady(q *Queue) error {
 }
 
 type Broker struct {
-	listener net.Listener
-	log      logger.Logger
-	qStore   *queueStore
+	listener   net.Listener
+	log        logger.Logger
+	qStore     *queueStore
+	showStatus bool
 }
 
-func NewBroker(host string, port int) (Broker, error) {
+func NewBroker(host string, port int, showStatus bool) (Broker, error) {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	conn, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -110,14 +111,19 @@ func NewBroker(host string, port int) (Broker, error) {
 	log.Info(fmt.Sprintf("Listening on %s...", addr))
 
 	return Broker{
-		listener: conn,
-		log:      log,
-		qStore:   newQueueStore(),
+		listener:   conn,
+		log:        log,
+		qStore:     newQueueStore(),
+		showStatus: showStatus,
 	}, nil
 }
 
 func (b *Broker) Start() {
 	go b.handleClients()
+
+	if b.showStatus {
+		go b.startStatusJob()
+	}
 }
 
 func (b *Broker) handleClients() {
@@ -171,6 +177,8 @@ func (b *Broker) handleProducer(p *producer) {
 		pReq, err := transport.ReadProduceRequestFrame(p.conn)
 
 		if err != nil {
+			p.log.Error(fmt.Errorf("Error reading produce request: %v", err))
+
 			if err == io.EOF {
 				// client connection was closed...
 				running = false
@@ -187,8 +195,10 @@ func (b *Broker) handleProducer(p *producer) {
 
 			err = q.Push(pReq.Message)
 			if err != nil {
-				p.log.Error(fmt.Errorf("Error enqueuing message: %s", err.Error()))
+				p.log.Error(fmt.Errorf("Error enqueuing message: %v", err))
+				continue
 			}
+
 			p.log.Info("Message enqueued!")
 			q.peek()
 
@@ -263,6 +273,18 @@ func (b *Broker) handshake(clientConn net.Conn) (string, *transport.HandshakeReq
 	} else {
 		clientID := transport.NewUUID().String()
 		return clientID, hsReq, transport.WriteResponse(clientID, transport.Success, clientConn)
+	}
+}
+
+func (b *Broker) startStatusJob() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for _ = range ticker.C {
+		for qName, q := range b.qStore.queues {
+			b.log.Debug(fmt.Sprintf("Status for %s", qName))
+			q.peek()
+		}
 	}
 }
 

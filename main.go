@@ -11,12 +11,13 @@ import (
 
 func main() {
 	var (
-		bindAddr = flag.String("bind-addr", broker.DefaultHost, "the IP address/hostname to bind to")
-		port     = flag.Int("port", broker.DefaultPort, "the port to bind to")
+		bindAddr   = flag.String("bind-addr", broker.DefaultHost, "the IP address/hostname to bind to")
+		port       = flag.Int("port", broker.DefaultPort, "the port to bind to")
+		showStatus = flag.Bool("status", false, "whether or not to periodically show broker status")
 	)
 	flag.Parse()
 
-	b, err := broker.NewBroker(*bindAddr, *port)
+	b, err := broker.NewBroker(*bindAddr, *port, *showStatus)
 	if err != nil {
 		log.Fatal(err)
 	}
